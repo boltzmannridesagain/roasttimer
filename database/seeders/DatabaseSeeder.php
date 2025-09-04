@@ -19,5 +19,12 @@ class DatabaseSeeder extends Seeder
             'name' => 'Test User',
             'email' => 'test@example.com',
         ]);
+
+        // Seed default data for Roast Timer
+        $this->call([
+            FoodItemSeeder::class,
+            DeviceSeeder::class,
+            CookingPhaseSeeder::class,
+        ]);
     }
 }
