@@ -9,6 +9,7 @@ import SavedMeals from '@/Components/RoastTimer/SavedMeals';
 export default function Index({ auth, canLogin, canRegister }) {
     const [currentStep, setCurrentStep] = useState('form');
     const [generatedPlan, setGeneratedPlan] = useState(null);
+    const [editingPlan, setEditingPlan] = useState(null);
     const [showSavedMeals, setShowSavedMeals] = useState(false);
 
     const handlePlanGenerated = (plan) => {
@@ -19,6 +20,12 @@ export default function Index({ auth, canLogin, canRegister }) {
     const handleBackToForm = () => {
         setCurrentStep('form');
         setGeneratedPlan(null);
+        setEditingPlan(null);
+    };
+
+    const handleEditPlan = () => {
+        setEditingPlan(generatedPlan);
+        setCurrentStep('form');
     };
 
     const handleShowSavedMeals = () => {
@@ -59,11 +66,15 @@ export default function Index({ auth, canLogin, canRegister }) {
                             {showSavedMeals ? (
                                 <SavedMeals onBack={handleHideSavedMeals} />
                             ) : currentStep === 'form' ? (
-                                <MealPlanForm onPlanGenerated={handlePlanGenerated} />
+                                <MealPlanForm 
+                                    onPlanGenerated={handlePlanGenerated} 
+                                    editingPlan={editingPlan}
+                                />
                             ) : (
                                 <MealPlanResults 
                                     plan={generatedPlan} 
                                     onBack={handleBackToForm}
+                                    onEditPlan={handleEditPlan}
                                 />
                             )}
                         </div>

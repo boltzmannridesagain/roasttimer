@@ -14,8 +14,29 @@ export default function FoodItemSelector({
         !selectedFoodItems.some(selected => selected.food_item_id === item.id)
     );
 
+    // Check if search term doesn't match any existing items and is not empty
+    const canCreateNew = searchTerm.trim() && 
+        !filteredFoodItems.some(item => 
+            item.name.toLowerCase() === searchTerm.toLowerCase()
+        ) &&
+        !selectedFoodItems.some(selected => 
+            selected.food_item.name.toLowerCase() === searchTerm.toLowerCase()
+        );
+
     const handleFoodItemSelect = (foodItem) => {
         onAddFoodItem(foodItem);
+        setSearchTerm('');
+        setShowDropdown(false);
+    };
+
+    const handleCreateNewIngredient = () => {
+        const newIngredient = {
+            id: `temp_${Date.now()}`, // Temporary ID for frontend use
+            name: searchTerm.trim(),
+            description: null,
+            is_custom: true // Flag to identify custom ingredients
+        };
+        onAddFoodItem(newIngredient);
         setSearchTerm('');
         setShowDropdown(false);
     };
@@ -36,7 +57,7 @@ export default function FoodItemSelector({
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
                 
-                {showDropdown && filteredFoodItems.length > 0 && (
+                {showDropdown && (filteredFoodItems.length > 0 || canCreateNew) && (
                     <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
                         {filteredFoodItems.map((foodItem) => (
                             <button
@@ -51,6 +72,21 @@ export default function FoodItemSelector({
                                 )}
                             </button>
                         ))}
+                        
+                        {canCreateNew && (
+                            <button
+                                type="button"
+                                onClick={handleCreateNewIngredient}
+                                className="w-full px-4 py-2 text-left hover:bg-green-50 focus:bg-green-50 focus:outline-none border-t border-gray-200"
+                            >
+                                <div className="font-medium text-green-700">
+                                    + Create "{searchTerm.trim()}"
+                                </div>
+                                <div className="text-sm text-green-600">
+                                    Add as new ingredient
+                                </div>
+                            </button>
+                        )}
                     </div>
                 )}
             </div>
@@ -63,13 +99,24 @@ export default function FoodItemSelector({
                         {selectedFoodItems.map((item, index) => (
                             <span
                                 key={index}
-                                className="inline-flex items-center px-3 py-1 rounded-full text-sm bg-blue-100 text-blue-800"
+                                className={`inline-flex items-center px-3 py-1 rounded-full text-sm ${
+                                    item.food_item.is_custom 
+                                        ? 'bg-green-100 text-green-800' 
+                                        : 'bg-blue-100 text-blue-800'
+                                }`}
                             >
                                 {item.food_item.name}
+                                {item.food_item.is_custom && (
+                                    <span className="ml-1 text-xs opacity-75">(custom)</span>
+                                )}
                                 <button
                                     type="button"
                                     onClick={() => onRemoveFoodItem(index)}
-                                    className="ml-2 text-blue-600 hover:text-blue-800"
+                                    className={`ml-2 ${
+                                        item.food_item.is_custom 
+                                            ? 'text-green-600 hover:text-green-800' 
+                                            : 'text-blue-600 hover:text-blue-800'
+                                    }`}
                                 >
                                     ×
                                 </button>

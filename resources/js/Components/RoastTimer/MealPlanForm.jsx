@@ -3,7 +3,7 @@ import axios from 'axios';
 import FoodItemSelector from './FoodItemSelector';
 import CookingPhaseSelector from './CookingPhaseSelector';
 
-export default function MealPlanForm({ onPlanGenerated }) {
+export default function MealPlanForm({ onPlanGenerated, editingPlan }) {
     const [formData, setFormData] = useState({
         name: '',
         description: '',
@@ -15,12 +15,20 @@ export default function MealPlanForm({ onPlanGenerated }) {
     const [foodItems, setFoodItems] = useState([]);
     const [devices, setDevices] = useState([]);
     const [cookingPhases, setCookingPhases] = useState([]);
+    const [customDevices, setCustomDevices] = useState([]);
+    const [customCookingPhases, setCustomCookingPhases] = useState([]);
     const [loading, setLoading] = useState(false);
     const [errors, setErrors] = useState({});
 
     useEffect(() => {
         loadInitialData();
     }, []);
+
+    useEffect(() => {
+        if (editingPlan) {
+            populateFormFromPlan(editingPlan);
+        }
+    }, [editingPlan]);
 
     const loadInitialData = async () => {
         try {
@@ -36,6 +44,66 @@ export default function MealPlanForm({ onPlanGenerated }) {
         } catch (error) {
             console.error('Error loading initial data:', error);
         }
+    };
+
+    const populateFormFromPlan = (plan) => {
+        console.log('Populating form from plan:', plan);
+        
+        // Convert the plan back to form data structure
+        const planFormData = {
+            name: plan.name || '',
+            description: plan.description || '',
+            serve_time: plan.serve_time ? new Date(plan.serve_time).toLocaleString('sv-SE').slice(0, 16) : '',
+            number_of_people: plan.number_of_people || 1,
+            food_items: plan.food_items || []
+        };
+
+        console.log('Plan form data:', planFormData);
+        setFormData(planFormData);
+
+        // Extract custom items from the plan
+        const customDevicesFromPlan = [];
+        const customCookingPhasesFromPlan = [];
+
+        plan.food_items?.forEach(item => {
+            item.cooking_phases?.forEach(phase => {
+                console.log('Processing phase:', phase);
+                console.log('cooking_phase_id type:', typeof phase.cooking_phase_id, 'value:', phase.cooking_phase_id);
+                
+                // Check if this is a custom cooking phase
+                if (phase.cooking_phase_id && 
+                    typeof phase.cooking_phase_id === 'string' && 
+                    phase.cooking_phase_id.startsWith('temp_')) {
+                    const existingCustom = customCookingPhasesFromPlan.find(cp => cp.id === phase.cooking_phase_id);
+                    if (!existingCustom && phase.cooking_phase) {
+                        customCookingPhasesFromPlan.push({
+                            id: phase.cooking_phase_id,
+                            name: phase.cooking_phase.name,
+                            description: phase.cooking_phase.description,
+                            device_required: phase.cooking_phase.device_required,
+                            is_custom: true
+                        });
+                    }
+                }
+
+                // Check if this is a custom device
+                if (phase.device_id && 
+                    typeof phase.device_id === 'string' && 
+                    phase.device_id.startsWith('temp_')) {
+                    const existingCustom = customDevicesFromPlan.find(d => d.id === phase.device_id);
+                    if (!existingCustom && phase.device) {
+                        customDevicesFromPlan.push({
+                            id: phase.device_id,
+                            name: phase.device.name,
+                            is_custom: true
+                        });
+                    }
+                }
+            });
+        });
+
+        setCustomDevices(customDevicesFromPlan);
+        setCustomCookingPhases(customCookingPhasesFromPlan);
     };
 
     const handleInputChange = (field, value) => {
@@ -65,6 +133,14 @@ export default function MealPlanForm({ onPlanGenerated }) {
         }));
     };
 
+    const addCustomDevice = (device) => {
+        setCustomDevices(prev => [...prev, device]);
+    };
+
+    const addCustomCookingPhase = (cookingPhase) => {
+        setCustomCookingPhases(prev => [...prev, cookingPhase]);
+    };
+
     const removeFoodItem = (index) => {
         setFormData(prev => ({
             ...prev,
@@ -73,11 +149,13 @@ export default function MealPlanForm({ onPlanGenerated }) {
     };
 
     const addCookingPhase = (foodItemIndex, phase) => {
+        const defaultDevice = phase.device_required ? (devices[0] || customDevices[0]) : null;
         const newPhase = {
             cooking_phase_id: phase.id,
             cooking_phase: phase,
             duration_minutes: 30,
-            device_id: phase.device_required ? (devices[0]?.id || null) : null
+            device_id: defaultDevice?.id || null,
+            device: defaultDevice
         };
 
         setFormData(prev => ({
@@ -111,15 +189,48 @@ export default function MealPlanForm({ onPlanGenerated }) {
                 index === foodItemIndex 
                     ? {
                         ...item,
-                        cooking_phases: item.cooking_phases.map((phase, pIndex) => 
-                            pIndex === phaseIndex 
-                                ? { ...phase, [field]: value }
-                                : phase
-                        )
+                        cooking_phases: item.cooking_phases.map((phase, pIndex) => {
+                            if (pIndex === phaseIndex) {
+                                const updatedPhase = { ...phase, [field]: value };
+                                
+                                // If updating device_id, also update the device object
+                                if (field === 'device_id') {
+                                    const allDevices = [...devices, ...customDevices];
+                                    const selectedDevice = allDevices.find(d => d.id === value);
+                                    updatedPhase.device = selectedDevice || null;
+                                }
+                                
+                                return updatedPhase;
+                            }
+                            return phase;
+                        })
                     }
                     : item
             )
         }));
+    };
+
+    const calculateEarliestCompletionTime = () => {
+        if (formData.food_items.length === 0) {
+            return null;
+        }
+
+        // Calculate total cooking time for each food item
+        const foodItemTimes = formData.food_items.map(item => {
+            const totalTime = item.cooking_phases.reduce((sum, phase) => {
+                return sum + (phase.duration_minutes || 0);
+            }, 0);
+            return totalTime;
+        });
+
+        // Find the maximum cooking time (longest item)
+        const maxCookingTime = Math.max(...foodItemTimes);
+
+        // Start from now and add the maximum cooking time + 10 minutes buffer
+        const now = new Date();
+        const completionTime = new Date(now.getTime() + (maxCookingTime + 10) * 60000);
+
+        return completionTime;
     };
 
     const handleSubmit = async (e) => {
@@ -128,15 +239,28 @@ export default function MealPlanForm({ onPlanGenerated }) {
         setErrors({});
 
         try {
+            // Calculate serve time if not provided
+            let serveTime = formData.serve_time;
+            if (!serveTime) {
+                const calculatedTime = calculateEarliestCompletionTime();
+                if (calculatedTime) {
+                    serveTime = calculatedTime.toISOString();
+                }
+            }
+
             // Prepare data for API
             const submitData = {
                 ...formData,
+                serve_time: serveTime,
                 food_items: formData.food_items.map(item => ({
                     food_item_id: item.food_item_id,
+                    food_item: item.food_item, // Include the full food item data
                     cooking_phases: item.cooking_phases.map(phase => ({
                         cooking_phase_id: phase.cooking_phase_id,
+                        cooking_phase: phase.cooking_phase, // Include the full cooking phase data
                         duration_minutes: phase.duration_minutes,
-                        device_id: phase.device_id
+                        device_id: phase.device_id,
+                        device: phase.device // Include the full device data
                     }))
                 }))
             };
@@ -179,23 +303,7 @@ export default function MealPlanForm({ onPlanGenerated }) {
                             {/* Critical Fields - Highlighted */}
                             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
                                 <h3 className="text-sm font-semibold text-blue-800 mb-3">⚠️ Required Information</h3>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-sm font-bold text-blue-800 mb-2">
-                                            🍽️ Meal Name *
-                                        </label>
-                                        <input
-                                            type="text"
-                                            value={formData.name}
-                                            onChange={(e) => handleInputChange('name', e.target.value)}
-                                            className="w-full px-3 py-2 border-2 border-blue-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
-                                            placeholder="e.g., Sunday Roast"
-                                        />
-                                        {errors.name && (
-                                            <p className="mt-1 text-sm text-red-600">{errors.name[0]}</p>
-                                        )}
-                                    </div>
-
+                                <div className="space-y-4">
                                     <div>
                                         <label className="block text-sm font-bold text-blue-800 mb-2">
                                             ⏰ Serve Time *
@@ -206,32 +314,68 @@ export default function MealPlanForm({ onPlanGenerated }) {
                                             onChange={(e) => handleInputChange('serve_time', e.target.value)}
                                             className="w-full px-3 py-2 border-2 border-blue-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
                                         />
+                                        <p className="mt-1 text-sm text-gray-600">
+                                            💡 Leave empty to auto-calculate based on your food items + 10 minutes buffer
+                                        </p>
+                                        {!formData.serve_time && formData.food_items.length > 0 && (() => {
+                                            const calculatedTime = calculateEarliestCompletionTime();
+                                            if (calculatedTime) {
+                                                const timeStr = calculatedTime.toLocaleString('en-US', {
+                                                    weekday: 'short',
+                                                    month: 'short',
+                                                    day: 'numeric',
+                                                    hour: '2-digit',
+                                                    minute: '2-digit'
+                                                });
+                                                return (
+                                                    <p className="mt-1 text-sm text-blue-600 font-medium">
+                                                        🕐 Will be set to: {timeStr}
+                                                    </p>
+                                                );
+                                            }
+                                            return null;
+                                        })()}
                                         {errors.serve_time && (
                                             <p className="mt-1 text-sm text-red-600">{errors.serve_time[0]}</p>
+                                        )}
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-bold text-blue-800 mb-2">
+                                            👨‍🍳 Number of Chefs *
+                                        </label>
+                                        <input
+                                            type="number"
+                                            min="1"
+                                            max="10"
+                                            value={formData.number_of_people}
+                                            onChange={(e) => handleInputChange('number_of_people', parseInt(e.target.value))}
+                                            className="w-full px-3 py-2 border-2 border-blue-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                                        />
+                                        {errors.number_of_people && (
+                                            <p className="mt-1 text-sm text-red-600">{errors.number_of_people[0]}</p>
                                         )}
                                     </div>
                                 </div>
                             </div>
 
-                            {/* Other Fields */}
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                                        Number of People *
-                                    </label>
-                                    <input
-                                        type="number"
-                                        min="1"
-                                        max="20"
-                                        value={formData.number_of_people}
-                                        onChange={(e) => handleInputChange('number_of_people', parseInt(e.target.value))}
-                                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                    />
-                                    {errors.number_of_people && (
-                                        <p className="mt-1 text-sm text-red-600">{errors.number_of_people[0]}</p>
-                                    )}
-                                </div>
+                            {/* Meal Name - Optional */}
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    🍽️ Meal Name
+                                </label>
+                                <input
+                                    type="text"
+                                    value={formData.name}
+                                    onChange={(e) => handleInputChange('name', e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    placeholder="e.g., Sunday Roast (optional)"
+                                />
+                                {errors.name && (
+                                    <p className="mt-1 text-sm text-red-600">{errors.name[0]}</p>
+                                )}
                             </div>
+
 
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -284,14 +428,16 @@ export default function MealPlanForm({ onPlanGenerated }) {
                                     </div>
 
                                     <CookingPhaseSelector
-                                        cookingPhases={cookingPhases}
-                                        devices={devices}
+                                        cookingPhases={[...cookingPhases, ...customCookingPhases]}
+                                        devices={[...devices, ...customDevices]}
                                         selectedPhases={foodItem.cooking_phases}
                                         onAddPhase={(phase) => addCookingPhase(foodItemIndex, phase)}
                                         onRemovePhase={(phaseIndex) => removeCookingPhase(foodItemIndex, phaseIndex)}
                                         onUpdatePhase={(phaseIndex, field, value) => 
                                             updateCookingPhase(foodItemIndex, phaseIndex, field, value)
                                         }
+                                        onAddCustomDevice={addCustomDevice}
+                                        onAddCustomCookingPhase={addCustomCookingPhase}
                                     />
                                 </div>
                             ))}

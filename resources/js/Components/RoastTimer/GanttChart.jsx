@@ -23,16 +23,16 @@ export default function GanttChart({ plan }) {
             current.setMinutes(current.getMinutes() + 30);
         }
         
-        // Generate colors for food items
-        const foodItems = [...new Set(plan.tasks.map(task => task.food_item))];
+        // Generate colors for cooking phases
+        const cookingPhases = [...new Set(plan.tasks.map(task => task.cooking_phase))];
         const colors = {};
         const colorPalette = [
             '#3B82F6', '#EF4444', '#10B981', '#F59E0B', '#8B5CF6',
             '#EC4899', '#06B6D4', '#84CC16', '#F97316', '#6366F1'
         ];
         
-        foodItems.forEach((foodItem, index) => {
-            colors[foodItem] = colorPalette[index % colorPalette.length];
+        cookingPhases.forEach((cookingPhase, index) => {
+            colors[cookingPhase] = colorPalette[index % colorPalette.length];
         });
         
         return { timeline: { minTime, maxTime }, timeSlots, colors };
@@ -78,25 +78,26 @@ export default function GanttChart({ plan }) {
         return groupedByFood;
     };
 
-    const maxPeople = Math.max(...plan.tasks.map(task => task.person_assigned));
+    const maxChefs = Math.max(...plan.tasks.map(task => task.person_assigned));
 
     return (
         <div className="p-6">
             <h2 className="text-xl font-semibold mb-4">Cooking Timeline</h2>
             
-            <div className="overflow-x-auto">
-                <div className="min-w-full">
+            <div className="overflow-x-auto" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+                <div className="min-w-full" style={{ minWidth: '800px' }}>
                     {/* Time Header */}
                     <div className="flex mb-2">
                         <div className="w-32 flex-shrink-0"></div>
-                        <div className="flex-1 relative">
+                        <div className="flex-1 relative" style={{ height: '20px' }}>
                             {timeSlots.map((time, index) => (
                                 <div
                                     key={index}
                                     className="absolute text-xs text-gray-600"
                                     style={{
                                         left: `${(index / (timeSlots.length - 1)) * 100}%`,
-                                        transform: 'translateX(-50%)'
+                                        transform: 'translateX(-50%)',
+                                        top: '0px'
                                     }}
                                 >
                                     {formatTime(time)}
@@ -121,29 +122,29 @@ export default function GanttChart({ plan }) {
                         </div>
                     </div>
                     
-                    {/* Person + Ingredient Rows */}
-                    {Array.from({ length: maxPeople }, (_, index) => index + 1).map(personNumber => {
-                        const personIngredientRows = getPersonIngredientRows(personNumber);
-                        const foodItems = Object.keys(personIngredientRows);
+                    {/* Chef + Ingredient Rows */}
+                    {Array.from({ length: maxChefs }, (_, index) => index + 1).map(chefNumber => {
+                        const chefIngredientRows = getPersonIngredientRows(chefNumber);
+                        const foodItems = Object.keys(chefIngredientRows);
                         
                         return (
-                            <div key={personNumber} className="mb-6">
-                                {/* Person Header */}
+                            <div key={chefNumber} className="mb-6">
+                                {/* Chef Header */}
                                 <div className="flex mb-2">
                                     <div className="w-32 flex-shrink-0 flex items-center">
                                         <span className="text-sm font-bold text-gray-800">
-                                            Person {personNumber}
+                                            Chef {chefNumber}
                                         </span>
                                     </div>
                                     <div className="flex-1"></div>
                                 </div>
                                 
-                                {/* Ingredient Rows for this Person */}
+                                {/* Ingredient Rows for this Chef */}
                                 {foodItems.map((foodItem, foodIndex) => {
-                                    const tasks = personIngredientRows[foodItem];
+                                    const tasks = chefIngredientRows[foodItem];
                                     
                                     return (
-                                        <div key={`${personNumber}-${foodItem}`} className="flex mb-2">
+                                        <div key={`${chefNumber}-${foodItem}`} className="flex mb-2">
                                             <div className="w-32 flex-shrink-0 flex items-center pl-4">
                                                 <span className="text-xs text-gray-600">
                                                     {foodItem}
@@ -161,7 +162,7 @@ export default function GanttChart({ plan }) {
                                                             style={{
                                                                 left: position.left,
                                                                 width: position.width,
-                                                                backgroundColor: colors[task.food_item],
+                                                                backgroundColor: colors[task.cooking_phase],
                                                                 minWidth: '50px'
                                                             }}
                                                             title={`${task.cooking_phase} (${task.duration_minutes}m) - ${task.device || 'No device'}`}
@@ -184,15 +185,15 @@ export default function GanttChart({ plan }) {
             
             {/* Legend */}
             <div className="mt-6">
-                <h3 className="text-sm font-medium text-gray-700 mb-3">Food Items</h3>
+                <h3 className="text-sm font-medium text-gray-700 mb-3">Cooking Phases</h3>
                 <div className="flex flex-wrap gap-3">
-                    {Object.entries(colors).map(([foodItem, color]) => (
-                        <div key={foodItem} className="flex items-center">
+                    {Object.entries(colors).map(([cookingPhase, color]) => (
+                        <div key={cookingPhase} className="flex items-center">
                             <div
                                 className="w-4 h-4 rounded mr-2"
                                 style={{ backgroundColor: color }}
                             />
-                            <span className="text-sm text-gray-600">{foodItem}</span>
+                            <span className="text-sm text-gray-600">{cookingPhase}</span>
                         </div>
                     ))}
                 </div>

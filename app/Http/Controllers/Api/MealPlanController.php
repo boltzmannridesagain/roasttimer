@@ -21,33 +21,63 @@ class MealPlanController extends Controller
     public function generate(Request $request): JsonResponse
     {
         $request->validate([
-            'name' => 'required|string|max:255',
+            'name' => 'nullable|string|max:255',
             'description' => 'nullable|string|max:1000',
             'serve_time' => 'required|date|after:now',
             'number_of_people' => 'required|integer|min:1|max:20',
             'food_items' => 'required|array|min:1',
-            'food_items.*.food_item_id' => 'required|exists:food_items,id',
+            'food_items.*.food_item_id' => 'required',
             'food_items.*.cooking_phases' => 'required|array|min:1',
-            'food_items.*.cooking_phases.*.cooking_phase_id' => 'required|exists:cooking_phases,id',
+            'food_items.*.cooking_phases.*.cooking_phase_id' => 'required',
             'food_items.*.cooking_phases.*.duration_minutes' => 'required|integer|min:1|max:480',
-            'food_items.*.cooking_phases.*.device_id' => 'nullable|exists:devices,id',
+            'food_items.*.cooking_phases.*.device_id' => 'nullable',
         ]);
 
-        // Custom validation: device_id is required only if cooking phase requires a device
-        $cookingPhases = CookingPhase::whereIn('id', collect($request->food_items)
+        // Separate real IDs from temporary IDs for validation
+        $realFoodItemIds = collect($request->food_items)
+            ->pluck('food_item_id')
+            ->filter(fn($id) => !str_starts_with($id, 'temp_'))
+            ->toArray();
+            
+        $realCookingPhaseIds = collect($request->food_items)
             ->pluck('cooking_phases')
             ->flatten(1)
             ->pluck('cooking_phase_id')
-        )->get()->keyBy('id');
+            ->filter(fn($id) => !str_starts_with($id, 'temp_'))
+            ->toArray();
 
+        // Validate only real IDs exist in database
+        if (!empty($realFoodItemIds)) {
+            $existingFoodItems = FoodItem::whereIn('id', $realFoodItemIds)->pluck('id')->toArray();
+            $missingFoodItems = array_diff($realFoodItemIds, $existingFoodItems);
+            if (!empty($missingFoodItems)) {
+                return response()->json(['message' => 'Some food items do not exist'], 400);
+            }
+        }
+
+        if (!empty($realCookingPhaseIds)) {
+            $existingCookingPhases = CookingPhase::whereIn('id', $realCookingPhaseIds)->pluck('id')->toArray();
+            $missingCookingPhases = array_diff($realCookingPhaseIds, $existingCookingPhases);
+            if (!empty($missingCookingPhases)) {
+                return response()->json(['message' => 'Some cooking phases do not exist'], 400);
+            }
+        }
+
+        // Get cooking phases for device validation (only real ones)
+        $cookingPhases = CookingPhase::whereIn('id', $realCookingPhaseIds)->get()->keyBy('id');
+
+        // Validate device requirements for real cooking phases only
         foreach ($request->food_items as $foodItemIndex => $foodItem) {
             foreach ($foodItem['cooking_phases'] as $phaseIndex => $phase) {
-                $cookingPhase = $cookingPhases[$phase['cooking_phase_id']] ?? null;
-                if ($cookingPhase && $cookingPhase->device_required && !$phase['device_id']) {
-                    throw new \Illuminate\Validation\ValidationException(
-                        validator: \Illuminate\Support\Facades\Validator::make([], []),
-                        errorBag: 'default'
-                    );
+                // Only validate device requirements for real cooking phases
+                if (!str_starts_with($phase['cooking_phase_id'], 'temp_')) {
+                    $cookingPhase = $cookingPhases[$phase['cooking_phase_id']] ?? null;
+                    if ($cookingPhase && $cookingPhase->device_required && !$phase['device_id']) {
+                        throw new \Illuminate\Validation\ValidationException(
+                            validator: \Illuminate\Support\Facades\Validator::make([], []),
+                            errorBag: 'default'
+                        );
+                    }
                 }
             }
         }
@@ -57,6 +87,13 @@ class MealPlanController extends Controller
 
         // Generate the cooking plan
         $plan = $this->generateCookingPlan($request->food_items, $serveTime, $numberOfPeople);
+
+        // Add the original form data to the response for editing purposes
+        $plan['name'] = $request->name;
+        $plan['description'] = $request->description;
+        $plan['serve_time'] = $serveTime->format('Y-m-d\TH:i:s');
+        $plan['number_of_people'] = $numberOfPeople;
+        $plan['food_items'] = $request->food_items; // Include original food items data
 
         // If user is authenticated, save the meal
         if (Auth::check()) {
@@ -69,13 +106,16 @@ class MealPlanController extends Controller
                 'plan_data' => $plan,
             ]);
 
-            // Save food items with their cooking phases
+            // Save food items with their cooking phases (only real items, not temporary ones)
             foreach ($request->food_items as $foodItemData) {
-                MealFoodItem::create([
-                    'user_meal_id' => $userMeal->id,
-                    'food_item_id' => $foodItemData['food_item_id'],
-                    'cooking_phases' => $foodItemData['cooking_phases'],
-                ]);
+                // Only save real food items to the database
+                if (!str_starts_with($foodItemData['food_item_id'], 'temp_')) {
+                    MealFoodItem::create([
+                        'user_meal_id' => $userMeal->id,
+                        'food_item_id' => $foodItemData['food_item_id'],
+                        'cooking_phases' => $foodItemData['cooking_phases'],
+                    ]);
+                }
             }
 
             $plan['meal_id'] = $userMeal->id;
@@ -141,15 +181,39 @@ class MealPlanController extends Controller
 
         // Process each food item and its cooking phases
         foreach ($foodItems as $foodItemData) {
-            $foodItem = FoodItem::find($foodItemData['food_item_id']);
+            // Handle custom food items
+            if (str_starts_with($foodItemData['food_item_id'], 'temp_')) {
+                $foodItemName = $foodItemData['food_item']['name'] ?? 'Custom Food Item';
+            } else {
+                $foodItem = FoodItem::find($foodItemData['food_item_id']);
+                $foodItemName = $foodItem ? $foodItem->name : 'Unknown Food Item';
+            }
+            
             $currentTime = $serveTime->copy();
 
             // Process phases in reverse order (from serving backwards)
             $phases = array_reverse($foodItemData['cooking_phases']);
             
             foreach ($phases as $phaseData) {
-                $cookingPhase = CookingPhase::find($phaseData['cooking_phase_id']);
-                $device = Device::find($phaseData['device_id']);
+                // Handle custom cooking phases
+                if (str_starts_with($phaseData['cooking_phase_id'], 'temp_')) {
+                    $cookingPhaseName = $phaseData['cooking_phase']['name'] ?? 'Custom Phase';
+                } else {
+                    $cookingPhase = CookingPhase::find($phaseData['cooking_phase_id']);
+                    $cookingPhaseName = $cookingPhase ? $cookingPhase->name : 'Unknown Phase';
+                }
+                
+                // Handle custom devices
+                $deviceName = null;
+                if ($phaseData['device_id']) {
+                    if (str_starts_with($phaseData['device_id'], 'temp_')) {
+                        $deviceName = $phaseData['device']['name'] ?? 'Custom Device';
+                    } else {
+                        $device = Device::find($phaseData['device_id']);
+                        $deviceName = $device ? $device->name : 'Unknown Device';
+                    }
+                }
+                
                 $duration = $phaseData['duration_minutes'];
 
                 // Calculate start time
@@ -157,12 +221,12 @@ class MealPlanController extends Controller
 
                 $task = [
                     'id' => uniqid(),
-                    'food_item' => $foodItem->name,
-                    'cooking_phase' => $cookingPhase->name,
-                    'device' => $device->name,
+                    'food_item' => $foodItemName,
+                    'cooking_phase' => $cookingPhaseName,
+                    'device' => $deviceName,
                     'duration_minutes' => $duration,
-                    'start_time' => $startTime->toISOString(),
-                    'end_time' => $currentTime->toISOString(),
+                    'start_time' => $startTime->format('Y-m-d\TH:i:s'),
+                    'end_time' => $currentTime->format('Y-m-d\TH:i:s'),
                     'person_assigned' => null, // Will be assigned later
                 ];
 
@@ -183,7 +247,7 @@ class MealPlanController extends Controller
         $timeline = $this->generateTimeline($tasks);
 
         return [
-            'serve_time' => $serveTime->toISOString(),
+            'serve_time' => $serveTime->format('Y-m-d\TH:i:s'),
             'number_of_people' => $numberOfPeople,
             'total_duration_minutes' => $this->calculateTotalDuration($tasks),
             'tasks' => $tasks,
@@ -285,7 +349,7 @@ class MealPlanController extends Controller
             if (!$currentTime || $taskTime->format('Y-m-d H:i') !== $currentTime->format('Y-m-d H:i')) {
                 $currentTime = $taskTime;
                 $timeline[] = [
-                    'time' => $currentTime->toISOString(),
+                    'time' => $currentTime->format('Y-m-d\TH:i:s'),
                     'tasks' => []
                 ];
             }
@@ -342,6 +406,8 @@ class MealPlanController extends Controller
         $startTime = Carbon::parse($earliestStart);
         $endTime = Carbon::parse($latestEnd);
         
-        return $endTime->diffInMinutes($startTime);
+        // Ensure we don't get negative durations
+        $duration = $endTime->diffInMinutes($startTime);
+        return max(0, $duration);
     }
 }
