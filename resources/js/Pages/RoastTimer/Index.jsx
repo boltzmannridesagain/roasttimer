@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Head } from '@inertiajs/react';
+import { Head, Link } from '@inertiajs/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import GuestLayout from '@/Layouts/GuestLayout';
 import MealPlanForm from '@/Components/RoastTimer/MealPlanForm';
@@ -61,6 +61,17 @@ export default function Index({ auth, canLogin, canRegister }) {
 
             <div className="py-6">
                 <div className="w-full px-4 sm:px-6 lg:px-8">
+                    {/* Holiday Planner Link */}
+                    <div className="max-w-4xl mx-auto mb-6">
+                        <Link
+                            href={route('holiday-planner')}
+                            className="inline-flex items-center px-6 py-3 bg-gradient-to-r from-orange-400 to-yellow-400 hover:from-orange-500 hover:to-yellow-500 text-white font-bold rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105"
+                        >
+                            <span className="mr-2">🏖️</span>
+                            Plan Your Mediterranean Holiday
+                        </Link>
+                    </div>
+                    
                     <div className="max-w-4xl mx-auto bg-white overflow-hidden shadow-sm sm:rounded-lg">
                         <div className="p-4 sm:p-6 text-gray-900">
                             {showSavedMeals ? (

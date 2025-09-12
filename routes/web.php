@@ -12,6 +12,13 @@ Route::get('/', function () {
     ]);
 });
 
+Route::get('/holiday-planner', function () {
+    return Inertia::render('HolidayPlanner/Index', [
+        'canLogin' => Route::has('login'),
+        'canRegister' => Route::has('register'),
+    ]);
+})->name('holiday-planner');
+
 Route::get('/dashboard', function () {
     return Inertia::render('Dashboard');
 })->middleware(['auth', 'verified'])->name('dashboard');
